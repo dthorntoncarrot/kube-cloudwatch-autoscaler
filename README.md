@@ -110,3 +110,17 @@ Create the following policy (or just use `CloudWatchReadOnlyAccess`) and attach 
     ]
 }
 ```
+
+### The python implemention
+
+When I got my hands on this code I was pretty impressed that it was so tight. Basucaly one bash scripts and good docs gives you a powerful peice of glue.
+
+But I hit a bug. I wanted to scale on elb latency which is reporting in seconds, fractions of seconds, decimal places of seconds. THe bash scipt could not handle that.
+
+I decided that the best way to fix it would be to re-implement the script in python. The hard part has been done by Chris Duncan (veqryn), I could jsut go line by line and convert to python.
+
+That's what I've done here.
+
+I used python virtenv to get this to work and the make the dependancies clear.
+
+
