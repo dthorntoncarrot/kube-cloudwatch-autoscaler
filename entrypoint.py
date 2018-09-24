@@ -14,10 +14,13 @@
 
 import sys
 import os
+import signal
 import datetime
+import time
 import logging
 from envparse import env
 from kubernetes import client, config
+import urllib.request
 import boto3
 import pprint
 
@@ -54,12 +57,12 @@ KUBERNETES_PORT_443_TCP_PORT = env('KUBERNETES_PORT_443_TCP_PORT', cast=str, def
 
 # There can be multiple CloudWatch Dimensions, so split into an array
 CW_DIMENSIONS_ARRY= CW_DIMENSIONS.split()
-logger.debug("{} CW_DIMENSIONS is {}".format(datetime.datetime.utcnow().date(), CW_DIMENSIONS))
+logger.debug("{} CW_DIMENSIONS is {}".format(datetime.datetime.utcnow(), CW_DIMENSIONS))
 
 # Create Kubernetes scaling url
 # KUBE_URL="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_PORT_443_TCP_PORT}/${KUBE_ENDPOINT}"
 KUBE_URL="https://{}:{}/{}".format(KUBERNETES_SERVICE_HOST , KUBERNETES_PORT_443_TCP_PORT, KUBE_ENDPOINT)
-logger.debug("{} KUBE_URL is {}".format(datetime.datetime.utcnow().date(), KUBE_URL))
+logger.debug("{} KUBE_URL is {}".format(datetime.datetime.utcnow(), KUBE_URL))
 
 # Set last scaling event time to be far in the past, so initial comparisons work.
 # This format works for both busybox and gnu date commands.
@@ -67,21 +70,40 @@ logger.debug("{} KUBE_URL is {}".format(datetime.datetime.utcnow().date(), KUBE_
 # 31536000 seconds is one year.
 # KUBE_LAST_SCALING=$(date -u -I'seconds' -d @$(( $(date -u +%s) - 31536000 )))
 KUBE_LAST_SCALING=datetime.datetime.utcnow() - datetime.timedelta(days=365) 
+logger.debug("{} Last Scalaing is {}".format(datetime.datetime.utcnow(),KUBE_LAST_SCALING))
 
 # printf '%s\n' "$(date -u -I'seconds') Starting autoscaler..."
-print('{} Starting autoscaler...'.format( datetime.datetime.utcnow().date()))
+print('{} Starting autoscaler...'.format( datetime.datetime.utcnow()))
 
 # Exit immediately on signal
 # trap 'exit 0' SIGINT SIGTERM EXIT
 
-# Loop forever
-#while true
-#do
-#    # Sleep poll period with wait on trapped signal
-#    sleep "${CW_POLL_PERIOD}s" & wait "${!}"
-#
-#    # Get kubernetes service endpoint token
-#    KUBE_TOKEN=$(</var/run/secrets/kubernetes.io/serviceaccount/token)
+def handler(signum, frame):
+    message='{} Recevied Signal: {}'.format(datetime.datetime.utcnow(),signum)
+    logger.error(message)
+    raise Exception(message)
+
+signal.signal(signal.SIGINT,  handler)
+signal.signal(signal.SIGTERM, handler)
+signal.signal(signal.SIGHUP,  handler)
+signal.signal(signal.SIGQUIT, handler)
+
+while True:
+    logger.debug("{} Tick".format(datetime.datetime.utcnow()))
+    time.sleep(CW_POLL_PERIOD)
+
+    try:
+        with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as tokenfile:
+            KUBE_TOKEN=tokenfile.read().replace('\n', '')
+    except:
+        KUBE_TOKEN='dummy'
+    logger.debug('{} Token {}'.format(datetime.datetime.utcnow(),KUBE_TOKEN))
+
+    config.load_kube_config()
+    v1 = client.CoreV1Api()
+    
+
+
 #
 #    # Query kubernetes pod/deployment current replica count
 #    KUBE_CURRENT_OUTPUT=$(curl -sS --cacert "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt" -H "Authorization: Bearer ${KUBE_TOKEN}" "${KUBE_URL}")
