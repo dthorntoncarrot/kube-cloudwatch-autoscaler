@@ -16,13 +16,17 @@ import sys
 import os
 import signal
 import datetime
+import pytz
 import time
 import logging
 from envparse import env
 from kubernetes import client, config
-import urllib.request
+import urllib3.request
 import boto3
 import pprint
+import gzip
+import json
+import re
 
 DEBUG = env.bool("DEBUG",default=False)
 
@@ -33,6 +37,8 @@ else:
 
 logging.basicConfig(stream=sys.stderr, level=LOGLEVEL)
 logger = logging.getLogger()
+
+pp = pprint.PrettyPrinter(indent=4)
 
 KUBE_ENDPOINT             = env( 'KUBE_ENDPOINT',            cast=str, default="Required: KUBE_ENDPOINT must be equal to the Kube API scaling endpoint for the deployment, such as: 'apis/apps/v1beta1/namespaces/default/deployments/<MyAppName>/scale")
 KUBE_MIN_REPLICAS         = env( 'KUBE_MIN_REPLICAS',        cast=int,   default=1)
@@ -47,7 +53,7 @@ CW_SCALE_UP_VALUE         = env( 'CW_SCALE_UP_VALUE',        cast=float, default
 CW_NAMESPACE              = env( 'CW_NAMESPACE' ,            cast=str,   default="Required: CW_NAMESPACE must be set to the AWS CloudWatch Namespace, such as: 'AWS/SQS'")
 CW_METRIC_NAME            = env( 'CW_METRIC_NAME',           cast=str,   default="Required: CW_METRIC_NAME must be set to the AWS CloudWatch MetricName, such as: 'ApproximateAgeOfOldestMessage'" )
 CW_DIMENSIONS             = env( 'CW_DIMENSIONS',            cast=str,   default="Required: CW_DIMENSIONS must be set to the AWS CloudWatch Dimensions, such as: 'Name=QueueName,Value=my_sqs_queue_name'")
-CW_STATISTIC              = env( 'CW_STATISTIC',             cast=str,   default="Average")
+CW_STATISTICS             = env( 'CW_STATISTICS',            cast=str,   default="Average")
 CW_PERIOD                 = env( 'CW_PERIOD',                cast=int,   default=360)
 CW_POLL_PERIOD            = env( 'CW_POLL_PERIOD',           cast=int,   default=30)
 
@@ -55,9 +61,21 @@ CW_POLL_PERIOD            = env( 'CW_POLL_PERIOD',           cast=int,   default
 KUBERNETES_SERVICE_HOST      = env('KUBERNETES_SERVICE_HOST',      cast=str, default='kubernetes.default.svc')
 KUBERNETES_PORT_443_TCP_PORT = env('KUBERNETES_PORT_443_TCP_PORT', cast=str, default='443')
 
+# for now only do one dimention with Name / Value
+#pattern = re.compile('Name=(?P<name>.*?),Value=(?P<value>.*?)',re.VERBOSE)
+#match = pattern.match(CW_DIMENSIONS)
+#CW_DIMENSION_NAME = match.group("name")
+#CW_DIMENSION_VALUE = match.group("value")
+
+pattern = re.compile('Name=(.*),Value=(.*)',re.VERBOSE)
+match = pattern.match(CW_DIMENSIONS)
+CW_DIMENSION_NAME  = match.group(1)
+CW_DIMENSION_VALUE = match.group(2)
+
+print("CW_DIMENSION_NAME ({}) CW_DIMENSION_VALUE ({})".format(CW_DIMENSION_NAME,CW_DIMENSION_VALUE))
 # There can be multiple CloudWatch Dimensions, so split into an array
-CW_DIMENSIONS_ARRY= CW_DIMENSIONS.split()
-logger.debug("{} CW_DIMENSIONS is {}".format(datetime.datetime.utcnow(), CW_DIMENSIONS))
+#CW_DIMENSIONS_ARRY= CW_DIMENSIONS.split()
+#logger.debug("{} CW_DIMENSIONS is {}".format(datetime.datetime.utcnow(), CW_DIMENSIONS))
 
 # Create Kubernetes scaling url
 # KUBE_URL="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_PORT_443_TCP_PORT}/${KUBE_ENDPOINT}"
@@ -96,48 +114,138 @@ while True:
         with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as tokenfile:
             KUBE_TOKEN=tokenfile.read().replace('\n', '')
     except:
-        KUBE_TOKEN='dummy'
-    logger.debug('{} Token {}'.format(datetime.datetime.utcnow(),KUBE_TOKEN))
+        raise Exception('Failed to get TOKEN from /var/run/secrets/kubernetes.io/serviceaccount/token, ServiceAcccount set?')
 
-    config.load_kube_config()
-    v1 = client.CoreV1Api()
-    
+    http = urllib3.PoolManager(
+      ca_certs='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
+    )
+    r = http.request (
+      'GET',
+      KUBE_URL,
+      headers={
+        'Authorization' : 'Bearer {}'.format(KUBE_TOKEN),
+        'Accept' : 'application/json'
+      }
+    )
+    data=json.loads(r.data)
+    KUBE_CURRENT_REPLICAS = data['spec']['replicas']
+    logger.debug('{} Current replicas is {}'.format(datetime.datetime.utcnow(),data['spec']['replicas']))
+
+    boto3.set_stream_logger(name='boto3', level=0, format_string=None)
+    cloudwatch=boto3.client('cloudwatch')
+
+    starttime    = pytz.utc.localize(datetime.datetime.utcnow()) - datetime.timedelta(seconds=CW_PERIOD)
+    starttimestr = starttime.strftime('%Y-%m-%dT%H:%M:%S%Z')
+
+    endtime      = pytz.utc.localize(datetime.datetime.utcnow())
+    endtimestr   = endtime.strftime('%Y-%m-%dT%H:%M:%S%Z')
+
+    logger.debug('{} STARTTIME {}'.format(datetime.datetime.utcnow(),starttimestr))
+    logger.debug('{} ENDTIME {}'.format(datetime.datetime.utcnow(),endtimestr))
+
+    logger.debug('get_metric_statistics( Namespace={} , CW_DIMENSION_NAME={} CW_DIMENSION_VALUE={} MetricName={} StartTime={} EndTime={} Period={} Statistics={})'.format(CW_NAMESPACE, CW_DIMENSION_NAME, CW_DIMENSION_VALUE, CW_METRIC_NAME, starttimestr, endtimestr, CW_PERIOD, CW_STATISTICS))
+
+    response = cloudwatch.get_metric_statistics(
+        Namespace=CW_NAMESPACE,
+        Dimensions=[
+            {
+            'Name': 'LoadBalancerName',
+            'Value': 'af09614cf860a11e8a624020685d3d74'
+            }
+        ],
+        MetricName=CW_METRIC_NAME,
+        StartTime=starttime.strftime('%Y-%m-%dT%H:%M:%S%Z'),                         
+        EndTime=endtime.strftime('%Y-%m-%dT%H:%M:%S%Z'), 
+        Period=CW_PERIOD,
+        Statistics=[CW_STATISTICS]
+        )
+
+    try:
+        response['Datapoints'][0][CW_STATISTICS]
+    except NameError:
+        print "AWS CloudWatch Metric returned no datapoints. If metric exists and container has aws auth, then period may be set too low. Namespace: {} MetricName: {} Dimensions: {} Statistics: {} Period: {} Output: {}".format( CW_NAMESPACE, CW_METRIC_NAME, CW_DIMENSIONS_ARRAY, CW_STATISTICS, CW_PERIOD, response['Datapoints'])
+    except IndexError:
+        pp.pprint(response)
+
+    else:
+        CW_VALUE = response['Datapoints'][0][CW_STATISTICS]
+    logger.debug('{} CW_VALUE {}'.format(datetime.datetime.utcnow(),CW_VALUE))
+    print('{} CW_VALUE {}'.format(datetime.datetime.utcnow(),CW_VALUE))
+
+    if CW_VALUE <= CW_SCALE_DOWN_VALUE:
+        print("CW_VALUE({}) <= CW_SCALE_DOWN_VALUE({})".format(CW_VALUE,CW_SCALE_DOWN_VALUE))
+        print("maybe Scale down, replica count?")
+        if KUBE_CURRENT_REPLICAS > KUBE_MIN_REPLICAS:
+            print("KUBE_CURRENT_REPLICAS ({}) > KUBE_MIN_REPLICAS ({}), cool down passed?".format(KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
+            print("KUBE_LAST_SCALING ({})".format(KUBE_LAST_SCALING))
+            if KUBE_LAST_SCALING < datetime.datetime.utcnow() - datetime.timedelta(seconds=KUBE_SCALE_DOWN_COOLDOWN):
+                print("passed scale down cooldown ({})".format(KUBE_SCALE_DOWN_COOLDOWN))
+                print("scale down!")
+                NEW_REPLICAS=KUBE_CURRENT_REPLICAS - KUBE_SCALE_DOWN_COUNT
+                print("Scaling down from {} to {}".format(KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
+                PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
+                print("PAYLOAD: {}".format(PAYLOAD))
+                print("http.request ( 'PATCH', {}, headers={{ 'Authorization' : 'Bearer {}', 'Accept' : 'application/json' }}, body={})".format(KUBE_URL,KUBE_TOKEN,PAYLOAD))
+
+		r = http.request (
+                    'PATCH',
+                    KUBE_URL,
+                    headers={
+                        'Authorization' : 'Bearer {}'.format(KUBE_TOKEN),
+                        'Accept' : 'application/json',
+                        'Content-Type' : 'application/json-patch+json'
+                    },
+                    body=PAYLOAD
+                )
+                print("type r:{}".format(type(r)))
+                print("data r:{}".format(r.data))
+                # pp.pprint(r.text)
+
+                #if r.code == 200:
+                #    print("Success")
+                #else:
+                #    print("uh oh: reponse({})".format(r.code))
+                data=json.loads(r.data)
+                pp.pprint(data)
+                datetime.datetime.utcnow()
+            else:
+                print("did not pass scale down cooldown ({}): no scale".format(KUBE_SCALE_DOWN_COOLDOWN))
+        else:
+            print("KUBE_CURRENT_REPLICAS ({}) !> KUBE_MIN_REPLICAS({}): no scale".format(KUBE_CURRENT_REPLICAS,KUBE_MIN_REPLICAS))
+    elif CW_SCALE_UP_VALUE > CW_VALUE > CW_SCALE_DOWN_VALUE:
+        print("Do nothing CW_SCALE_UP_VALUE({}) > CW_VALUE({}) > CW_SCALE_DOWN_VALUE({})".format(CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
+
+    elif CW_VALUE >= CW_SCALE_UP_VALUE:
+        print("CW_VALUE({}) >= CW_SCALE_UP_VALUE({})".format(CW_VALUE,CW_SCALE_UP_VALUE))
+        print("maybe Scale up, replica count?")
+        if KUBE_CURRENT_REPLICAS < KUBE_MAX_REPLICAS:
+            print("KUBE_CURRENT_REPLICAS ({}) < KUBE_MAX_REPLICAS({}), cool down passed?".format( KUBE_CURRENT_REPLICAS, KUBE_MAX_REPLICAS))
+            print("KUBE_LAST_SCALING ({})".format(KUBE_LAST_SCALING))
+            if KUBE_LAST_SCALING < datetime.datetime.utcnow() - datetime.timedelta(seconds=KUBE_SCALE_UP_COOLDOWN):
+                print("passwed scale up cooldown ({})".format(KUBE_SCALE_UP_COOLDOWN))
+                print("scale up!")
+                NEW_REPLICAS=KUBE_CURRENT_REPLICAS + KUBE_SCALE_UP_COUNT
+                print("Scaling up from {} to {}".format(KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
+                PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
+                r = http.request (
+                    'PATCH',
+                    KUBE_URL,
+                    headers={
+                        'Authorization' : 'Bearer {}'.format(KUBE_TOKEN),
+                        'Accept' : 'application/json',
+                        'Content-Type' : 'application/json-patch+json'
+                    },
+                    body=PAYLOAD
+                )
+		print("type r:{}".format(type(r)))
+                print("data r:{}".format(r.data))
+                KUBE_LAST_SCALING=datetime.datetime.utcnow()
+            else:
+                print("waiting on scala up cooldown")
+    else:
+        print("Bad values: CW_SCALE_UP_VALUE({}) CW_VALUE({}) CW_SCALE_DOWN_VALUE({})".format(CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
 
 
-#
-#    # Query kubernetes pod/deployment current replica count
-#    KUBE_CURRENT_OUTPUT=$(curl -sS --cacert "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt" -H "Authorization: Bearer ${KUBE_TOKEN}" "${KUBE_URL}")
-#    if [[ "${?}" -ne 0 ]]; then
-#        printf '%s\n' "$(date -u -I'seconds') Exiting: Unable to query kubernetes service account. URL:${KUBE_URL} Output:${KUBE_CURRENT_OUTPUT}"
-#        exit 1 # Kube will restart this pod
-#    fi
-#
-#    KUBE_CURRENT_REPLICAS=$(printf '%s' "${KUBE_CURRENT_OUTPUT}" | jq 'first(.spec.replicas, .status.replicas | numbers)')
-#    if [[ -z "${KUBE_CURRENT_REPLICAS}" || "${KUBE_CURRENT_REPLICAS}" == "null" ]]; then
-#        printf '%s\n' "$(date -u -I'seconds') Exiting: Kubernetes service account not showing .spec.replicas or .status.replicas: ${KUBE_CURRENT_OUTPUT}"
-#        exit 1 # Kube will restart this pod
-#    fi
-#    if [ "${VERBOSE}" = true ]; then
-#        printf '%s\n' "$(date -u -I'seconds') Kube Replicas: ${KUBE_CURRENT_REPLICAS}"
-#    fi
-#
-#    # Query aws cloudwatch metric
-#    CW_OUTPUT=$(aws cloudwatch get-metric-statistics --namespace "${CW_NAMESPACE}" --metric-name "${CW_METRIC_NAME}" --dimensions "${CW_DIMENSIONS_ARRAY[@]}" --start-time $(date -u -I'seconds' -d @$(( $(date -u +%s) - ${CW_PERIOD} ))) --end-time $(date -u -I'seconds') --statistics "${CW_STATISTICS}" --period "${CW_PERIOD}")
-#    if [[ "${?}" -ne 0 ]]; then
-#        printf '%s\n' "$(date -u -I'seconds') Exiting: Unable to query AWS CloudWatch Metric: ${CW_OUTPUT}"
-#        exit 1 # Kube will restart this pod
-#    fi
-#
-#    CW_VALUE=$(printf '%s' "${CW_OUTPUT}" | jq ".Datapoints[0].${CW_STATISTICS} | numbers")
-#    if [[ -z "${CW_VALUE}" || "${CW_VALUE}" == "null" ]]; then
-#        printf '%s\n' "$(date -u -I'seconds') AWS CloudWatch Metric returned no datapoints. If metric exists and container has aws auth, then period may be set too low. Namespace:${CW_NAMESPACE} MetricName:${CW_METRIC_NAME} Dimensions:${CW_DIMENSIONS_ARRAY[@]} Statistics:${CW_STATISTICS} Period:${CW_PERIOD} Output:${CW_OUTPUT}"
-#        continue
-#    fi
-#    # CloudWatch metrics can have decimals, but bash doesn't like them, so remove with printf
-#    CW_VALUE=$(printf '%.0f' "${CW_VALUE}")
-#    if [ "${VERBOSE}" = true ]; then
-#        printf '%s\n' "$(date -u -I'seconds') AWS CloudWatch Value: ${CW_VALUE}"
-#    fi
 #
 #    # If the metric value is <= the scale-down value, and current replica count is > min replicas, and the last time we scaled up or down was at least the cooldown period ago
 #    if [[ "${CW_VALUE}" -le "${CW_SCALE_DOWN_VALUE}"  &&  "${KUBE_CURRENT_REPLICAS}" -gt "${KUBE_MIN_REPLICAS}"  &&  "${KUBE_LAST_SCALING}" < $(date -u -I'seconds' -d @$(( $(date -u +%s) - ${KUBE_SCALE_DOWN_COOLDOWN} ))) ]]; then
@@ -180,3 +288,5 @@ while True:
 #    fi
 #
 #done
+
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
