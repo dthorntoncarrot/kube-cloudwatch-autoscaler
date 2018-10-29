@@ -202,6 +202,25 @@ while True:
                 datetime.datetime.utcnow()
             else:
                 print("did not pass scale down cooldown ({}): no scale".format(KUBE_SCALE_DOWN_COOLDOWN))
+        elif KUBE_CURRENT_REPLICAS < KUBE_MIN_REPLICAS:
+            print("KUBE_CURRENT_REPLICAS ({}) < KUBE_MIN_REPLICAS ({}), scale up to min at least".format(KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
+            NEW_REPLICAS=KUBE_MIN_REPLICAS
+            PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
+            r = http.request (
+                'PATCH',
+                KUBE_URL,
+                headers={
+                    'Authorization' : 'Bearer {}'.format(KUBE_TOKEN),
+                    'Accept' : 'application/json',
+                    'Content-Type' : 'application/json-patch+json'
+                },
+                body=PAYLOAD
+            )
+            print("type r:{}".format(type(r)))
+            print("data r:{}".format(r.data))
+            data=json.loads(r.data)
+            pp.pprint(data)
+            datetime.datetime.utcnow()
         else:
             print("KUBE_CURRENT_REPLICAS ({}) !> KUBE_MIN_REPLICAS({}): no scale".format(KUBE_CURRENT_REPLICAS,KUBE_MIN_REPLICAS))
     elif CW_SCALE_UP_VALUE > CW_VALUE > CW_SCALE_DOWN_VALUE:

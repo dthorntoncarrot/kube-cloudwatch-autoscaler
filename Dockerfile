@@ -8,6 +8,8 @@ RUN set -eux; \
   apk upgrade; \
   apk add --update --no-cache tzdata ca-certificates curl jq bash less; \
   apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine/edge/testing aws-cli; \
+  pip install --upgrade pip
+  pip install -r requirements.txt
   rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
 
 # Add script
