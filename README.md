@@ -10,6 +10,7 @@ Docker image can be found on Docker Hub (https://hub.docker.com/r/veqryn/kube-cl
 2. Create the below deployment in your Kubernetes cluster, after changing the variables to suite your needs.
 
 ### Kubernetes deployment yaml (with default values for optional variables)
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment

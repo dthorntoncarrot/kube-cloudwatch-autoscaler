@@ -21,6 +21,7 @@ import json
 import re
 
 DEBUG = env.bool("DEBUG",default=False)
+NOOP = env.bool("NOOP",default=False)
 
 if DEBUG:
     LOGLEVEL = logging.DEBUG
@@ -85,6 +86,9 @@ logger.debug("{} Last Scalaing is {}".format(datetime.datetime.utcnow(),KUBE_LAS
 # printf '%s\n' "$(date -u -I'seconds') Starting autoscaler..."
 print('{} Starting autoscaler...'.format( datetime.datetime.utcnow()))
 
+if CW_SCALE_DOWN_VALUE >= CW_SCALE_UP_VALUE:
+    logger.critical("CW_SCALE_DOWN_VALUE ({}) is greater than CW_SCALE_UP_VALUE ({}). This is invalid, exiting".format(CW_SCALE_DOWN_VALUE,CW_SCALE_UP_VALUE))
+
 # Exit immediately on signal
 # trap 'exit 0' SIGINT SIGTERM EXIT
 
@@ -111,6 +115,7 @@ while True:
     http = urllib3.PoolManager(
       ca_certs='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
     )
+
     r = http.request (
       'GET',
       KUBE_URL,
@@ -141,8 +146,8 @@ while True:
         Namespace=CW_NAMESPACE,
         Dimensions=[
             {
-            'Name': 'LoadBalancerName',
-            'Value': 'af09614cf860a11e8a624020685d3d74'
+            'Name': CW_DIMENSION_NAME,
+            'Value': CW_DIMENSION_VALUE
             }
         ],
         MetricName=CW_METRIC_NAME,
@@ -179,6 +184,10 @@ while True:
                 print("PAYLOAD: {}".format(PAYLOAD))
                 print("http.request ( 'PATCH', {}, headers={{ 'Authorization' : 'Bearer {}', 'Accept' : 'application/json' }}, body={})".format(KUBE_URL,KUBE_TOKEN,PAYLOAD))
 
+                if NOOP:
+                    logger.info("NOOP set, skipping scale down")
+                    continue
+
 		r = http.request (
                     'PATCH',
                     KUBE_URL,
@@ -205,20 +214,25 @@ while True:
         else:
             print("KUBE_CURRENT_REPLICAS ({}) !> KUBE_MIN_REPLICAS({}): no scale".format(KUBE_CURRENT_REPLICAS,KUBE_MIN_REPLICAS))
     elif CW_SCALE_UP_VALUE > CW_VALUE > CW_SCALE_DOWN_VALUE:
-        print("Do nothing CW_SCALE_UP_VALUE({}) > CW_VALUE({}) > CW_SCALE_DOWN_VALUE({})".format(CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
+        logger.info("Do nothing CW_SCALE_UP_VALUE({}) > CW_VALUE({}) > CW_SCALE_DOWN_VALUE({})".format(CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
 
     elif CW_VALUE >= CW_SCALE_UP_VALUE:
-        print("CW_VALUE({}) >= CW_SCALE_UP_VALUE({})".format(CW_VALUE,CW_SCALE_UP_VALUE))
-        print("maybe Scale up, replica count?")
+        logger.info("CW_VALUE({}) >= CW_SCALE_UP_VALUE({})".format(CW_VALUE,CW_SCALE_UP_VALUE))
+        logger.info("maybe Scale up, replica count?")
         if KUBE_CURRENT_REPLICAS < KUBE_MAX_REPLICAS:
             print("KUBE_CURRENT_REPLICAS ({}) < KUBE_MAX_REPLICAS({}), cool down passed?".format( KUBE_CURRENT_REPLICAS, KUBE_MAX_REPLICAS))
             print("KUBE_LAST_SCALING ({})".format(KUBE_LAST_SCALING))
             if KUBE_LAST_SCALING < datetime.datetime.utcnow() - datetime.timedelta(seconds=KUBE_SCALE_UP_COOLDOWN):
-                print("passwed scale up cooldown ({})".format(KUBE_SCALE_UP_COOLDOWN))
+                print("passed scale up cooldown ({})".format(KUBE_SCALE_UP_COOLDOWN))
                 print("scale up!")
                 NEW_REPLICAS=KUBE_CURRENT_REPLICAS + KUBE_SCALE_UP_COUNT
                 print("Scaling up from {} to {}".format(KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
                 PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
+
+                if NOOP:
+                    logger.info("NOOP set, skipping scale up")
+                    continue
+
                 r = http.request (
                     'PATCH',
                     KUBE_URL,
@@ -229,11 +243,11 @@ while True:
                     },
                     body=PAYLOAD
                 )
-		print("type r:{}".format(type(r)))
-                print("data r:{}".format(r.data))
+		logger.debug("type r:{}".format(type(r)))
+                logger.debug("data r:{}".format(r.data))
                 KUBE_LAST_SCALING=datetime.datetime.utcnow()
             else:
-                print("waiting on scala up cooldown")
+                logger.info("waiting on scale up cooldown")
     else:
         print("Bad values: CW_SCALE_UP_VALUE({}) CW_VALUE({}) CW_SCALE_DOWN_VALUE({})".format(CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
 
