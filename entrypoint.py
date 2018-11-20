@@ -103,8 +103,8 @@ signal.signal(signal.SIGHUP,  handler)
 signal.signal(signal.SIGQUIT, handler)
 
 while True:
-    logger.debug("{} Tick".format(datetime.datetime.utcnow()))
     time.sleep(CW_POLL_PERIOD)
+    logger.debug("{} Tick".format(datetime.datetime.utcnow()))
 
     try:
         with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as tokenfile:
@@ -112,9 +112,13 @@ while True:
     except:
         raise Exception('Failed to get TOKEN from /var/run/secrets/kubernetes.io/serviceaccount/token, ServiceAcccount set?')
 
-    http = urllib3.PoolManager(
-      ca_certs='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
-    )
+    try:
+        http = urllib3.PoolManager(
+            ca_certs='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
+        )
+    except BaseException e:
+        logger.info('Failed to create urllib3.PoolManager: msg: {} arg: {}'.format(e.message, e.args))
+        exit
 
     r = http.request (
       'GET',
@@ -124,6 +128,7 @@ while True:
         'Accept' : 'application/json'
       }
     )
+
     data=json.loads(r.data)
     KUBE_CURRENT_REPLICAS = data['spec']['replicas']
     logger.debug('{} Current replicas is {}'.format(datetime.datetime.utcnow(),data['spec']['replicas']))
@@ -161,8 +166,10 @@ while True:
         response['Datapoints'][0][CW_STATISTICS]
     except NameError:
         print "AWS CloudWatch Metric returned no datapoints. If metric exists and container has aws auth, then period may be set too low. Namespace: {} MetricName: {} Dimensions: {} Statistics: {} Period: {} Output: {}".format( CW_NAMESPACE, CW_METRIC_NAME, CW_DIMENSIONS_ARRAY, CW_STATISTICS, CW_PERIOD, response['Datapoints'])
+        continue
     except IndexError:
         pp.pprint(response)
+        continue
 
     else:
         CW_VALUE = response['Datapoints'][0][CW_STATISTICS]
@@ -171,7 +178,8 @@ while True:
 
     if CW_VALUE <= CW_SCALE_DOWN_VALUE:
         print("CW_VALUE({}) <= CW_SCALE_DOWN_VALUE({})".format(CW_VALUE,CW_SCALE_DOWN_VALUE))
-        print("maybe Scale down, replica count?")
+        print("maybe Scale down replica count?")
+
         if KUBE_CURRENT_REPLICAS > KUBE_MIN_REPLICAS:
             print("KUBE_CURRENT_REPLICAS ({}) > KUBE_MIN_REPLICAS ({}), cool down passed?".format(KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
             print("KUBE_LAST_SCALING ({})".format(KUBE_LAST_SCALING))
@@ -210,9 +218,35 @@ while True:
                 pp.pprint(data)
                 datetime.datetime.utcnow()
             else:
-                print("did not pass scale down cooldown ({}): no scale".format(KUBE_SCALE_DOWN_COOLDOWN))
+                logger.info("waiting on scale down cooldown ({})".format(KUBE_SCALE_DOWN_COOLDOWN))
+
+        elif KUBE_CURRENT_REPLICAS < KUBE_MIN_REPLICAS:
+            print("KUBE_CURRENT_REPLICAS ({}) < KUBE_MIN_REPLICAS ({}), scale up to min at least".format(KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
+            NEW_REPLICAS=KUBE_MIN_REPLICAS
+            PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
+
+            if NOOP:
+                logger.info("NOOP set, skipping scale up")
+                continue 
+
+            r = http.request (
+                'PATCH',
+                KUBE_URL,
+                headers={
+                    'Authorization' : 'Bearer {}'.format(KUBE_TOKEN),
+                    'Accept' : 'application/json',
+                    'Content-Type' : 'application/json-patch+json'
+                },
+                body=PAYLOAD
+            )
+            logger.debug("type r:{}".format(type(r)))
+            logger.debug("data r:{}".format(r.data))
+            data=json.loads(r.data)
+            if DEBUG:
+               pp.pprint(data)
         else:
-            print("KUBE_CURRENT_REPLICAS ({}) !> KUBE_MIN_REPLICAS({}): no scale".format(KUBE_CURRENT_REPLICAS,KUBE_MIN_REPLICAS))
+            logger.info("KUBE_CURRENT_REPLICAS ({}) !> KUBE_MIN_REPLICAS({}): no scale".format(KUBE_CURRENT_REPLICAS,KUBE_MIN_REPLICAS))
+
     elif CW_SCALE_UP_VALUE > CW_VALUE > CW_SCALE_DOWN_VALUE:
         logger.info("Do nothing CW_SCALE_UP_VALUE({}) > CW_VALUE({}) > CW_SCALE_DOWN_VALUE({})".format(CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
 
@@ -223,8 +257,8 @@ while True:
             print("KUBE_CURRENT_REPLICAS ({}) < KUBE_MAX_REPLICAS({}), cool down passed?".format( KUBE_CURRENT_REPLICAS, KUBE_MAX_REPLICAS))
             print("KUBE_LAST_SCALING ({})".format(KUBE_LAST_SCALING))
             if KUBE_LAST_SCALING < datetime.datetime.utcnow() - datetime.timedelta(seconds=KUBE_SCALE_UP_COOLDOWN):
-                print("passed scale up cooldown ({})".format(KUBE_SCALE_UP_COOLDOWN))
-                print("scale up!")
+                logger.info("passed scale up cooldown ({})".format(KUBE_SCALE_UP_COOLDOWN))
+                logger.info("scale up!")
                 NEW_REPLICAS=KUBE_CURRENT_REPLICAS + KUBE_SCALE_UP_COUNT
                 print("Scaling up from {} to {}".format(KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
                 PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
@@ -247,7 +281,7 @@ while True:
                 logger.debug("data r:{}".format(r.data))
                 KUBE_LAST_SCALING=datetime.datetime.utcnow()
             else:
-                logger.info("waiting on scale up cooldown")
+                logger.info("waiting on scale up cooldown ({})".format(KUBE_SCALE_UP_COOLDOWN))
     else:
         print("Bad values: CW_SCALE_UP_VALUE({}) CW_VALUE({}) CW_SCALE_DOWN_VALUE({})".format(CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
 

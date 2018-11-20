@@ -97,15 +97,26 @@ data:
   aws-secret-access-key: "YXdzLXNlY3JldA=="
 ```
 
+if you are not using the aws secrets , and are instead using an IAM instance profile , the nyou must remove the secret lines from the deployment file.
+
 ### AWS Permissions
-Create the following policy (or just use `CloudWatchReadOnlyAccess`) and attach to the role or user.
+
+Create the following policy ( call it "kubernetes-cluster-autoscaler " ) and attach to the role or user you used above, or the iam instance profile.
 ```json
 {
     "Version": "2012-10-17",
     "Statement": [
         {
             "Effect": "Allow",
-            "Action": "cloudwatch:GetMetricStatistics",
+            "Action": [
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeAutoScalingInstances",
+                "autoscaling:DescribeTags",
+                "autoscaling:DescribeLaunchConfigurations",
+                "autoscaling:SetDesiredCapacity",
+                "autoscaling:TerminateInstanceInAutoScalingGroup",
+                "cloudwatch:GetMetricStatistics"
+            ],
             "Resource": "*"
         }
     ]
@@ -124,7 +135,22 @@ That's what I've done here.
 
 I used python virtenv to get this to work and the make the dependancies clear.
 
+#### Added features
+
+NOOP if set, don't do anything, just talk about it. all replica count altering activity is subverted.
+
+DEBUG if set say more about what you are doing.
+
+### Building the iamge
+
+from the working dir:
+
+ docker build -f python.Dockerfile . -t carrotrewards/kube-cloudwatch-autoscaler:latest
+
+ docker push carrotrewards/kube-cloudwatch-autoscaler:latest
+
 ### To do / wishlist
 
 * Put the cooldown checks before the cw metric fetch.
+* get th script to figure out the load balancer name from the k tags ( for example "kubernetes.io/service-name" = "servicename"
 
