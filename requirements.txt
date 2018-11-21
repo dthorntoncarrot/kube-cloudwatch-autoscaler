@@ -1,7 +1,7 @@
 adal==1.1.0
 asn1crypto==0.24.0
 boto3==1.9.9
-botocore==1.12.9
+botocore
 cachetools==2.1.0
 certifi==2018.8.24
 cffi==1.11.5
@@ -26,7 +26,7 @@ pytz==2018.5
 PyYAML==3.13
 requests==2.19.1
 requests-oauthlib==1.0.0
-rsa==4.0
+rsa
 s3transfer==0.1.13
 six==1.11.0
 urllib3==1.23

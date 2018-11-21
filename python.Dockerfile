@@ -1,23 +1,24 @@
 FROM alpine:3.8
 LABEL maintainer="Chris Duncan <github.com/veqryn>"
 
-# Install software requirements
 RUN set -eux; \
   apk update; \
   apk upgrade; \
   apk add --update --no-cache tzdata ca-certificates curl jq bash less python python-dev py-pip vim build-base libffi libffi-dev openssl-dev; \
-  apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine/edge/testing aws-cli; \
-  pip install --upgrade pip; \
-  rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+  rm -rf /var/cache/apk/* /tmp/* /var/tmp/*; 
 
+RUN pip install --upgrade pip; \
+    pip install awscli --upgrade --user;
+
+RUN  mkdir -p /myapp
 ADD entrypoint.py /myapp
-ADD shwenv.sh /myapp
+ADD showenv.sh /myapp
+ADD requirements.txt /myapp
 WORKDIR /myapp
 RUN pip install -r requirements.txt; \
-    chmod 755 entrypoint.py
-
-RUN groupadd -g 999 appuser && \
-    useradd -r -u 999 -g appuser appuser
+    chmod 755 entrypoint.py; \
+    # /usr/sbin/addgroup -g 999 appuser && \  # in alpine 999 is the "ping" group, but no files have this group, odd
+    /usr/sbin/adduser -h /myapp -s i/bin/fasle -g ping -D appuser
 USER appuser
 
 CMD ["/myapp/entrypoint.py"]
