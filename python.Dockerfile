@@ -18,7 +18,8 @@ WORKDIR /myapp
 RUN pip install -r requirements.txt; \
     chmod 755 entrypoint.py; \
     # /usr/sbin/addgroup -g 999 appuser && \  # in alpine 999 is the "ping" group, but no files have this group, odd
-    /usr/sbin/adduser -h /myapp -s i/bin/fasle -g ping -D appuser
+    /usr/sbin/adduser -h /myapp -s i/bin/fasle -g ping -D appuser ; \
+    chown appuser:appuser entrypoint.py showenv.sh requirements.txt
 USER appuser
 
 CMD ["/myapp/entrypoint.py"]

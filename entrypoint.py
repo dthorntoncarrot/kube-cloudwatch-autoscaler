@@ -20,11 +20,13 @@ import gzip
 import json
 import re
 
-DEBUG = env.bool("DEBUG",default=False)
+DEBUG = env("DEBUG", cast=str, default="DEBUG")
 NOOP = env.bool("NOOP",default=False)
 
-if DEBUG:
+if DEBUG == "DEBUG":
     LOGLEVEL = logging.DEBUG
+elif DEBUG == "INFO":
+    LOGLEVEL = logging.INFO
 else:
     LOGLEVEL = logging.WARNING
 
@@ -116,7 +118,7 @@ while True:
         http = urllib3.PoolManager(
             ca_certs='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
         )
-    except BaseException e:
+    except BaseException as e:
         logger.info('Failed to create urllib3.PoolManager: msg: {} arg: {}'.format(e.message, e.args))
         exit
 
