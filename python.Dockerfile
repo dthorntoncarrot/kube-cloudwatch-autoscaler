@@ -10,16 +10,20 @@ RUN set -eux; \
 RUN pip install --upgrade pip; \
     pip install awscli --upgrade --user;
 
-RUN  mkdir -p /myapp
+# root stuff
+RUN mkdir -p /myapp;
+RUN /usr/sbin/adduser -h /myapp -s i/bin/false -D appuser; \
+    chown appuser:appuser /myapp
+
+# app user
+WORKDIR /myapp
+USER appuser
+ENV PATH="/myapp/.local/bin:${PATH}"
 ADD entrypoint.py /myapp
 ADD showenv.sh /myapp
 ADD requirements.txt /myapp
-WORKDIR /myapp
-RUN pip install -r requirements.txt; \
-    chmod 755 entrypoint.py; \
-    # /usr/sbin/addgroup -g 999 appuser && \  # in alpine 999 is the "ping" group, but no files have this group, odd
-    /usr/sbin/adduser -h /myapp -s i/bin/fasle -g ping -D appuser ; \
-    chown appuser:appuser entrypoint.py showenv.sh requirements.txt
-USER appuser
+RUN pip install -r requirements.txt --user;
+
+#    /bin/chmod 755 /myapp/entrypoint.py;
 
 CMD ["/myapp/entrypoint.py"]

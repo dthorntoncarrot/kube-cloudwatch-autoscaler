@@ -30,7 +30,7 @@ elif DEBUG == "INFO":
 else:
     LOGLEVEL = logging.WARNING
 
-logging.basicConfig(stream=sys.stderr, level=LOGLEVEL)
+logging.basicConfig(stream=sys.stderr, level=LOGLEVEL, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
 pp = pprint.PrettyPrinter(indent=4)
@@ -67,7 +67,7 @@ match = pattern.match(CW_DIMENSIONS)
 CW_DIMENSION_NAME  = match.group(1)
 CW_DIMENSION_VALUE = match.group(2)
 
-print("CW_DIMENSION_NAME ({}) CW_DIMENSION_VALUE ({})".format(CW_DIMENSION_NAME,CW_DIMENSION_VALUE))
+logger.info("CW_DIMENSION_NAME ({}) CW_DIMENSION_VALUE ({})".format(CW_DIMENSION_NAME,CW_DIMENSION_VALUE))
 # There can be multiple CloudWatch Dimensions, so split into an array
 #CW_DIMENSIONS_ARRY= CW_DIMENSIONS.split()
 #logger.debug("{} CW_DIMENSIONS is {}".format(datetime.datetime.utcnow(), CW_DIMENSIONS))
@@ -75,7 +75,7 @@ print("CW_DIMENSION_NAME ({}) CW_DIMENSION_VALUE ({})".format(CW_DIMENSION_NAME,
 # Create Kubernetes scaling url
 # KUBE_URL="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_PORT_443_TCP_PORT}/${KUBE_ENDPOINT}"
 KUBE_URL="https://{}:{}/{}".format(KUBERNETES_SERVICE_HOST , KUBERNETES_PORT_443_TCP_PORT, KUBE_ENDPOINT)
-logger.debug("{} KUBE_URL is {}".format(datetime.datetime.utcnow(), KUBE_URL))
+logger.debug("KUBE_URL is {}".format(KUBE_URL))
 
 # Set last scaling event time to be far in the past, so initial comparisons work.
 # This format works for both busybox and gnu date commands.
@@ -83,10 +83,10 @@ logger.debug("{} KUBE_URL is {}".format(datetime.datetime.utcnow(), KUBE_URL))
 # 31536000 seconds is one year.
 # KUBE_LAST_SCALING=$(date -u -I'seconds' -d @$(( $(date -u +%s) - 31536000 )))
 KUBE_LAST_SCALING=datetime.datetime.utcnow() - datetime.timedelta(days=365) 
-logger.debug("{} Last Scalaing is {}".format(datetime.datetime.utcnow(),KUBE_LAST_SCALING))
+logger.debug("Last Scalaing is {}".format(KUBE_LAST_SCALING))
 
 # printf '%s\n' "$(date -u -I'seconds') Starting autoscaler..."
-print('{} Starting autoscaler...'.format( datetime.datetime.utcnow()))
+logger.info('Starting autoscaler...')
 
 if CW_SCALE_DOWN_VALUE >= CW_SCALE_UP_VALUE:
     logger.critical("CW_SCALE_DOWN_VALUE ({}) is greater than CW_SCALE_UP_VALUE ({}). This is invalid, exiting".format(CW_SCALE_DOWN_VALUE,CW_SCALE_UP_VALUE))
@@ -95,8 +95,7 @@ if CW_SCALE_DOWN_VALUE >= CW_SCALE_UP_VALUE:
 # trap 'exit 0' SIGINT SIGTERM EXIT
 
 def handler(signum, frame):
-    message='{} Recevied Signal: {}'.format(datetime.datetime.utcnow(),signum)
-    logger.error(message)
+    logger.error('Recevied Signal: {}'.format(datetime.datetime.utcnow(),signum))
     raise Exception(message)
 
 signal.signal(signal.SIGINT,  handler)
@@ -106,7 +105,7 @@ signal.signal(signal.SIGQUIT, handler)
 
 while True:
     time.sleep(CW_POLL_PERIOD)
-    logger.debug("{} Tick".format(datetime.datetime.utcnow()))
+    logger.debug("Tick")
 
     try:
         with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as tokenfile:
@@ -119,7 +118,7 @@ while True:
             ca_certs='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
         )
     except BaseException as e:
-        logger.info('Failed to create urllib3.PoolManager: msg: {} arg: {}'.format(e.message, e.args))
+        logger.info('Failed to create urllib3.PoolManager: msg: {} arg: {}'.format(e.message,e.args))
         exit
 
     r = http.request (
@@ -133,7 +132,7 @@ while True:
 
     data=json.loads(r.data)
     KUBE_CURRENT_REPLICAS = data['spec']['replicas']
-    logger.debug('{} Current replicas is {}'.format(datetime.datetime.utcnow(),data['spec']['replicas']))
+    logger.debug('Current replicas is {}'.format(,data['spec']['replicas']))
 
     boto3.set_stream_logger(name='boto3', level=0, format_string=None)
     cloudwatch=boto3.client('cloudwatch')
@@ -144,8 +143,8 @@ while True:
     endtime      = pytz.utc.localize(datetime.datetime.utcnow())
     endtimestr   = endtime.strftime('%Y-%m-%dT%H:%M:%S%Z')
 
-    logger.debug('{} STARTTIME {}'.format(datetime.datetime.utcnow(),starttimestr))
-    logger.debug('{} ENDTIME {}'.format(datetime.datetime.utcnow(),endtimestr))
+    logger.debug('STARTTIME {}'.format(starttimestr))
+    logger.debug('ENDTIME {}'.format(endtimestr))
 
     logger.debug('get_metric_statistics( Namespace={} , CW_DIMENSION_NAME={} CW_DIMENSION_VALUE={} MetricName={} StartTime={} EndTime={} Period={} Statistics={})'.format(CW_NAMESPACE, CW_DIMENSION_NAME, CW_DIMENSION_VALUE, CW_METRIC_NAME, starttimestr, endtimestr, CW_PERIOD, CW_STATISTICS))
 
@@ -167,7 +166,7 @@ while True:
     try:
         response['Datapoints'][0][CW_STATISTICS]
     except NameError:
-        print "AWS CloudWatch Metric returned no datapoints. If metric exists and container has aws auth, then period may be set too low. Namespace: {} MetricName: {} Dimensions: {} Statistics: {} Period: {} Output: {}".format( CW_NAMESPACE, CW_METRIC_NAME, CW_DIMENSIONS_ARRAY, CW_STATISTICS, CW_PERIOD, response['Datapoints'])
+        logger.error("AWS CloudWatch Metric returned no datapoints. If metric exists and container has aws auth, then period may be set too low. Namespace: {} MetricName: {} Dimensions: {} Statistics: {} Period: {} Output: {}".format(CW_NAMESPACE, CW_METRIC_NAME, CW_DIMENSIONS_ARRAY, CW_STATISTICS, CW_PERIOD, response['Datapoints']))
         continue
     except IndexError:
         pp.pprint(response)
@@ -175,27 +174,26 @@ while True:
 
     else:
         CW_VALUE = response['Datapoints'][0][CW_STATISTICS]
-    logger.debug('{} CW_VALUE {}'.format(datetime.datetime.utcnow(),CW_VALUE))
-    print('{} CW_VALUE {}'.format(datetime.datetime.utcnow(),CW_VALUE))
+    logger.info('CW_VALUE {}'.format(CW_VALUE))
 
     if CW_VALUE <= CW_SCALE_DOWN_VALUE:
-        print("CW_VALUE({}) <= CW_SCALE_DOWN_VALUE({})".format(CW_VALUE,CW_SCALE_DOWN_VALUE))
-        print("maybe Scale down replica count?")
+        logger.info("{} CW_VALUE({}) <= CW_SCALE_DOWN_VALUE({})".format(datetime.datetime.utcnow(),CW_VALUE,CW_SCALE_DOWN_VALUE))
+        logger.info("{} Maybe Scale down replica count?".format(datetime.datetime.utcnow()))
 
         if KUBE_CURRENT_REPLICAS > KUBE_MIN_REPLICAS:
-            print("KUBE_CURRENT_REPLICAS ({}) > KUBE_MIN_REPLICAS ({}), cool down passed?".format(KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
-            print("KUBE_LAST_SCALING ({})".format(KUBE_LAST_SCALING))
+            logger.info("{} KUBE_CURRENT_REPLICAS ({}) > KUBE_MIN_REPLICAS ({}), cool down passed?".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
+            logger.info("{} KUBE_LAST_SCALING ({})".format(datetime.datetime.utcnow(),KUBE_LAST_SCALING))
             if KUBE_LAST_SCALING < datetime.datetime.utcnow() - datetime.timedelta(seconds=KUBE_SCALE_DOWN_COOLDOWN):
-                print("passed scale down cooldown ({})".format(KUBE_SCALE_DOWN_COOLDOWN))
-                print("scale down!")
+                logger.info("{} passed scale down cooldown ({})".format(datetime.datetime.utcnow(),KUBE_SCALE_DOWN_COOLDOWN))
+                logger.warn("{} scale down!".format(datetime.datetime.utcnow()))
                 NEW_REPLICAS=KUBE_CURRENT_REPLICAS - KUBE_SCALE_DOWN_COUNT
-                print("Scaling down from {} to {}".format(KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
+                logger.info("{} Scaling down from {} to {}".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
                 PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
-                print("PAYLOAD: {}".format(PAYLOAD))
-                print("http.request ( 'PATCH', {}, headers={{ 'Authorization' : 'Bearer {}', 'Accept' : 'application/json' }}, body={})".format(KUBE_URL,KUBE_TOKEN,PAYLOAD))
+                logger.debug("{} PAYLOAD: {}".format(datetime.datetime.utcnow(),PAYLOAD))
+                logger.debug("{} http.request ( 'PATCH', {}, headers={{ 'Authorization' : 'Bearer {}', 'Accept' : 'application/json' }}, body={})".format(datetime.datetime.utcnow(),KUBE_URL,KUBE_TOKEN,PAYLOAD))
 
                 if NOOP:
-                    logger.info("NOOP set, skipping scale down")
+                    logger.info("{} NOOP set, skipping scale down".format(datetime.datetime.utcnow()))
                     continue
 
 		r = http.request (
@@ -208,8 +206,8 @@ while True:
                     },
                     body=PAYLOAD
                 )
-                print("type r:{}".format(type(r)))
-                print("data r:{}".format(r.data))
+                logger.debug("{} type r:{}".format(datetime.datetime.utcnow(),type(r)))
+                logger.debug("{} data r:{}".format(datetime.datetime.utcnow(),r.data))
                 # pp.pprint(r.text)
 
                 #if r.code == 200:
@@ -220,10 +218,10 @@ while True:
                 pp.pprint(data)
                 datetime.datetime.utcnow()
             else:
-                logger.info("waiting on scale down cooldown ({})".format(KUBE_SCALE_DOWN_COOLDOWN))
+                logger.info("{} waiting on scale down cooldown ({})".format(datetime.datetime.utcnow(),KUBE_SCALE_DOWN_COOLDOWN))
 
         elif KUBE_CURRENT_REPLICAS < KUBE_MIN_REPLICAS:
-            print("KUBE_CURRENT_REPLICAS ({}) < KUBE_MIN_REPLICAS ({}), scale up to min at least".format(KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
+            logger.info("{} KUBE_CURRENT_REPLICAS ({}) < KUBE_MIN_REPLICAS ({}), scale up to min at least".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
             NEW_REPLICAS=KUBE_MIN_REPLICAS
             PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
 
@@ -241,16 +239,16 @@ while True:
                 },
                 body=PAYLOAD
             )
-            logger.debug("type r:{}".format(type(r)))
-            logger.debug("data r:{}".format(r.data))
+            logger.debug("{} type r:{}".format(datetime.datetime.utcnow(),type(r)))
+            logger.debug("{} data r:{}".format(datetime.datetime.utcnow(),r.data))
             data=json.loads(r.data)
             if DEBUG:
                pp.pprint(data)
         else:
-            logger.info("KUBE_CURRENT_REPLICAS ({}) !> KUBE_MIN_REPLICAS({}): no scale".format(KUBE_CURRENT_REPLICAS,KUBE_MIN_REPLICAS))
+            logger.info("{} KUBE_CURRENT_REPLICAS ({}) !> KUBE_MIN_REPLICAS({}): no scale".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS,KUBE_MIN_REPLICAS))
 
     elif CW_SCALE_UP_VALUE > CW_VALUE > CW_SCALE_DOWN_VALUE:
-        logger.info("Do nothing CW_SCALE_UP_VALUE({}) > CW_VALUE({}) > CW_SCALE_DOWN_VALUE({})".format(CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
+        logger.info("{} Do nothing CW_SCALE_UP_VALUE({}) > CW_VALUE({}) > CW_SCALE_DOWN_VALUE({})".format(datetime.datetime.utcnow(),CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
 
     elif CW_VALUE >= CW_SCALE_UP_VALUE:
         logger.info("CW_VALUE({}) >= CW_SCALE_UP_VALUE({})".format(CW_VALUE,CW_SCALE_UP_VALUE))
@@ -279,6 +277,7 @@ while True:
                     },
                     body=PAYLOAD
                 )
+                logger.info("Scale up request response: OK{} REASON:{} CODE:{}".format(r.ok,r.reason,r.status_code))
 		logger.debug("type r:{}".format(type(r)))
                 logger.debug("data r:{}".format(r.data))
                 KUBE_LAST_SCALING=datetime.datetime.utcnow()
