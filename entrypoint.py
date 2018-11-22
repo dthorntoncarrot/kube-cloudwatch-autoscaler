@@ -181,8 +181,8 @@ while True:
     logger.info('CW_VALUE {}'.format(CW_VALUE))
 
     if CW_VALUE <= CW_SCALE_DOWN_VALUE:
-        logger.info("{} CW_VALUE({}) <= CW_SCALE_DOWN_VALUE({})".format(datetime.datetime.utcnow(),CW_VALUE,CW_SCALE_DOWN_VALUE))
-        logger.info("{} Maybe Scale down replica count?".format(datetime.datetime.utcnow()))
+        logger.info("CW_VALUE({}) <= CW_SCALE_DOWN_VALUE({})".format(CW_VALUE,CW_SCALE_DOWN_VALUE))
+        logger.info("Maybe Scale down replica count?")
 
         if KUBE_CURRENT_REPLICAS > KUBE_MIN_REPLICAS:
             logger.info("KUBE_CURRENT_REPLICAS ({}) > KUBE_MIN_REPLICAS ({}), cool down passed?".format(KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
