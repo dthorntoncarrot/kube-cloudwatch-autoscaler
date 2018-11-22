@@ -85,7 +85,6 @@ logger.debug("KUBE_URL is {}".format(KUBE_URL))
 KUBE_LAST_SCALING=datetime.datetime.utcnow() - datetime.timedelta(days=365) 
 logger.debug("Last Scalaing is {}".format(KUBE_LAST_SCALING))
 
-# printf '%s\n' "$(date -u -I'seconds') Starting autoscaler..."
 logger.info('Starting autoscaler...')
 
 if CW_SCALE_DOWN_VALUE >= CW_SCALE_UP_VALUE:
@@ -130,9 +129,14 @@ while True:
       }
     )
 
+    # urllib3.response desn't have a code or status_code - FIXME
+    #if r.status_code != 200:
+    #    logger.critical("uh oh: Request for auth token failed: reponse({})".format(r.status_code))
+    #    continue
+
     data=json.loads(r.data)
     KUBE_CURRENT_REPLICAS = data['spec']['replicas']
-    logger.debug('Current replicas is {}'.format(,data['spec']['replicas']))
+    logger.debug('Current replicas is {}'.format(data['spec']['replicas']))
 
     boto3.set_stream_logger(name='boto3', level=0, format_string=None)
     cloudwatch=boto3.client('cloudwatch')
@@ -169,7 +173,7 @@ while True:
         logger.error("AWS CloudWatch Metric returned no datapoints. If metric exists and container has aws auth, then period may be set too low. Namespace: {} MetricName: {} Dimensions: {} Statistics: {} Period: {} Output: {}".format(CW_NAMESPACE, CW_METRIC_NAME, CW_DIMENSIONS_ARRAY, CW_STATISTICS, CW_PERIOD, response['Datapoints']))
         continue
     except IndexError:
-        pp.pprint(response)
+        logger.debug(pp.pprint(response))
         continue
 
     else:
@@ -181,11 +185,11 @@ while True:
         logger.info("{} Maybe Scale down replica count?".format(datetime.datetime.utcnow()))
 
         if KUBE_CURRENT_REPLICAS > KUBE_MIN_REPLICAS:
-            logger.info("{} KUBE_CURRENT_REPLICAS ({}) > KUBE_MIN_REPLICAS ({}), cool down passed?".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
-            logger.info("{} KUBE_LAST_SCALING ({})".format(datetime.datetime.utcnow(),KUBE_LAST_SCALING))
-            if KUBE_LAST_SCALING < datetime.datetime.utcnow() - datetime.timedelta(seconds=KUBE_SCALE_DOWN_COOLDOWN):
-                logger.info("{} passed scale down cooldown ({})".format(datetime.datetime.utcnow(),KUBE_SCALE_DOWN_COOLDOWN))
-                logger.warn("{} scale down!".format(datetime.datetime.utcnow()))
+            logger.info("KUBE_CURRENT_REPLICAS ({}) > KUBE_MIN_REPLICAS ({}), cool down passed?".format(KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
+            logger.info("KUBE_LAST_SCALING ({})".format(KUBE_LAST_SCALING))
+            if ( datetime.datetime.utcnow() - KUBE_LAST_SCALING ) > datetime.timedelta(seconds=KUBE_SCALE_DOWN_COOLDOWN):
+                logger.info("Passed scale down cooldown ({} seconds)".format(KUBE_SCALE_DOWN_COOLDOWN))
+                logger.warn("Scale down!")
                 NEW_REPLICAS=KUBE_CURRENT_REPLICAS - KUBE_SCALE_DOWN_COUNT
                 logger.info("{} Scaling down from {} to {}".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
                 PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
@@ -206,19 +210,20 @@ while True:
                     },
                     body=PAYLOAD
                 )
+
+                # urlib3.response doesn't have a code or status_code - FIXME
+                # if r.status_code != 200:
+                #    logger.critical("uh oh: http request for scale down failed: reponse({})".format(r.status_code))
+                #    continue
+
                 logger.debug("{} type r:{}".format(datetime.datetime.utcnow(),type(r)))
                 logger.debug("{} data r:{}".format(datetime.datetime.utcnow(),r.data))
-                # pp.pprint(r.text)
 
-                #if r.code == 200:
-                #    print("Success")
-                #else:
-                #    print("uh oh: reponse({})".format(r.code))
                 data=json.loads(r.data)
                 pp.pprint(data)
-                datetime.datetime.utcnow()
+                KUBE_LAST_SCALING=datetime.datetime.utcnow()
             else:
-                logger.info("{} waiting on scale down cooldown ({})".format(datetime.datetime.utcnow(),KUBE_SCALE_DOWN_COOLDOWN))
+                logger.info("waiting on scale down cooldown ({})".format(KUBE_SCALE_DOWN_COOLDOWN))
 
         elif KUBE_CURRENT_REPLICAS < KUBE_MIN_REPLICAS:
             logger.info("{} KUBE_CURRENT_REPLICAS ({}) < KUBE_MIN_REPLICAS ({}), scale up to min at least".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
@@ -239,6 +244,12 @@ while True:
                 },
                 body=PAYLOAD
             )
+
+            # urllib3.response doens't havea code or status_code - FIXME
+            #if r.status_code != 200:
+            #    logger.critical("uh oh: http request for scale up failed: reponse({})".format(r.status_code))
+            #    continue
+
             logger.debug("{} type r:{}".format(datetime.datetime.utcnow(),type(r)))
             logger.debug("{} data r:{}".format(datetime.datetime.utcnow(),r.data))
             data=json.loads(r.data)
@@ -256,9 +267,9 @@ while True:
         if KUBE_CURRENT_REPLICAS < KUBE_MAX_REPLICAS:
             print("KUBE_CURRENT_REPLICAS ({}) < KUBE_MAX_REPLICAS({}), cool down passed?".format( KUBE_CURRENT_REPLICAS, KUBE_MAX_REPLICAS))
             print("KUBE_LAST_SCALING ({})".format(KUBE_LAST_SCALING))
-            if KUBE_LAST_SCALING < datetime.datetime.utcnow() - datetime.timedelta(seconds=KUBE_SCALE_UP_COOLDOWN):
-                logger.info("passed scale up cooldown ({})".format(KUBE_SCALE_UP_COOLDOWN))
-                logger.info("scale up!")
+            if ( datetime.datetime.utcnow() - KUBE_LAST_SCALING ) > datetime.timedelta(seconds=KUBE_SCALE_UP_COOLDOWN):
+                logger.info("Passed scale up cooldown ({} seconds)".format(KUBE_SCALE_UP_COOLDOWN))
+                logger.info("Scale up!")
                 NEW_REPLICAS=KUBE_CURRENT_REPLICAS + KUBE_SCALE_UP_COUNT
                 print("Scaling up from {} to {}".format(KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
                 PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
@@ -277,6 +288,11 @@ while True:
                     },
                     body=PAYLOAD
                 )
+
+                #if r.status_code != 200:
+                #    logger.critical("uh oh: http request for scale up failed: reponse({})".format(r.status_code))
+                #    continue
+
                 logger.info("Scale up request response: OK{} REASON:{} CODE:{}".format(r.ok,r.reason,r.status_code))
 		logger.debug("type r:{}".format(type(r)))
                 logger.debug("data r:{}".format(r.data))
