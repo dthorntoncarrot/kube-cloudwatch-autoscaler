@@ -94,7 +94,7 @@ if CW_SCALE_DOWN_VALUE >= CW_SCALE_UP_VALUE:
 # trap 'exit 0' SIGINT SIGTERM EXIT
 
 def handler(signum, frame):
-    logger.error('Recevied Signal: {}'.format(datetime.datetime.utcnow(),signum))
+    logger.error('Recevied Signal: {}'.format(signum))
     raise Exception(message)
 
 signal.signal(signal.SIGINT,  handler)
@@ -191,13 +191,13 @@ while True:
                 logger.info("Passed scale down cooldown ({} seconds)".format(KUBE_SCALE_DOWN_COOLDOWN))
                 logger.warn("Scale down!")
                 NEW_REPLICAS=KUBE_CURRENT_REPLICAS - KUBE_SCALE_DOWN_COUNT
-                logger.info("{} Scaling down from {} to {}".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
+                logger.info("Scaling down from {} to {}".format(KUBE_CURRENT_REPLICAS,NEW_REPLICAS))
                 PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
-                logger.debug("{} PAYLOAD: {}".format(datetime.datetime.utcnow(),PAYLOAD))
-                logger.debug("{} http.request ( 'PATCH', {}, headers={{ 'Authorization' : 'Bearer {}', 'Accept' : 'application/json' }}, body={})".format(datetime.datetime.utcnow(),KUBE_URL,KUBE_TOKEN,PAYLOAD))
+                logger.debug("PAYLOAD: {}".format(PAYLOAD))
+                logger.debug("http.request ( 'PATCH', {}, headers={{ 'Authorization' : 'Bearer {}', 'Accept' : 'application/json' }}, body={})".format(KUBE_URL,KUBE_TOKEN,PAYLOAD))
 
                 if NOOP:
-                    logger.info("{} NOOP set, skipping scale down".format(datetime.datetime.utcnow()))
+                    logger.info("NOOP set, skipping scale down")
                     continue
 
 		r = http.request (
@@ -216,8 +216,8 @@ while True:
                 #    logger.critical("uh oh: http request for scale down failed: reponse({})".format(r.status_code))
                 #    continue
 
-                logger.debug("{} type r:{}".format(datetime.datetime.utcnow(),type(r)))
-                logger.debug("{} data r:{}".format(datetime.datetime.utcnow(),r.data))
+                logger.debug("type r:{}".format(type(r)))
+                logger.debug("data r:{}".format(r.data))
 
                 data=json.loads(r.data)
                 pp.pprint(data)
@@ -226,7 +226,7 @@ while True:
                 logger.info("waiting on scale down cooldown ({})".format(KUBE_SCALE_DOWN_COOLDOWN))
 
         elif KUBE_CURRENT_REPLICAS < KUBE_MIN_REPLICAS:
-            logger.info("{} KUBE_CURRENT_REPLICAS ({}) < KUBE_MIN_REPLICAS ({}), scale up to min at least".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
+            logger.info("KUBE_CURRENT_REPLICAS ({}) < KUBE_MIN_REPLICAS ({}), scale up to min at least".format(KUBE_CURRENT_REPLICAS, KUBE_MIN_REPLICAS))
             NEW_REPLICAS=KUBE_MIN_REPLICAS
             PAYLOAD="[{{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":{}}}]".format(NEW_REPLICAS)
 
@@ -250,16 +250,16 @@ while True:
             #    logger.critical("uh oh: http request for scale up failed: reponse({})".format(r.status_code))
             #    continue
 
-            logger.debug("{} type r:{}".format(datetime.datetime.utcnow(),type(r)))
-            logger.debug("{} data r:{}".format(datetime.datetime.utcnow(),r.data))
+            logger.debug("type r:{}".format(type(r)))
+            logger.debug("data r:{}".format(r.data))
             data=json.loads(r.data)
             if DEBUG:
                pp.pprint(data)
         else:
-            logger.info("{} KUBE_CURRENT_REPLICAS ({}) !> KUBE_MIN_REPLICAS({}): no scale".format(datetime.datetime.utcnow(),KUBE_CURRENT_REPLICAS,KUBE_MIN_REPLICAS))
+            logger.info("KUBE_CURRENT_REPLICAS ({}) !> KUBE_MIN_REPLICAS({}): no scale".format(KUBE_CURRENT_REPLICAS,KUBE_MIN_REPLICAS))
 
     elif CW_SCALE_UP_VALUE > CW_VALUE > CW_SCALE_DOWN_VALUE:
-        logger.info("{} Do nothing CW_SCALE_UP_VALUE({}) > CW_VALUE({}) > CW_SCALE_DOWN_VALUE({})".format(datetime.datetime.utcnow(),CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
+        logger.info("Do nothing CW_SCALE_UP_VALUE({}) > CW_VALUE({}) > CW_SCALE_DOWN_VALUE({})".format(CW_SCALE_UP_VALUE,CW_VALUE,CW_SCALE_DOWN_VALUE))
 
     elif CW_VALUE >= CW_SCALE_UP_VALUE:
         logger.info("CW_VALUE({}) >= CW_SCALE_UP_VALUE({})".format(CW_VALUE,CW_SCALE_UP_VALUE))
