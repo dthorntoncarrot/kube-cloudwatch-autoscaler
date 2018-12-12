@@ -95,7 +95,7 @@ if CW_SCALE_DOWN_VALUE >= CW_SCALE_UP_VALUE:
 
 def handler(signum, frame):
     logger.error('Recevied Signal: {}'.format(signum))
-    raise Exception(message)
+    raise Exception(frame)
 
 signal.signal(signal.SIGINT,  handler)
 signal.signal(signal.SIGTERM, handler)
