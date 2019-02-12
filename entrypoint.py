@@ -293,7 +293,7 @@ while True:
                 #    logger.critical("uh oh: http request for scale up failed: reponse({})".format(r.status_code))
                 #    continue
 
-                logger.info("Scale up request response: OK{} REASON:{} CODE:{}".format(r.ok,r.reason,r.status_code))
+                logger.info("Scale up request response: REASON:{} CODE:{}".format(r.reason,r.status))
 		logger.debug("type r:{}".format(type(r)))
                 logger.debug("data r:{}".format(r.data))
                 KUBE_LAST_SCALING=datetime.datetime.utcnow()
